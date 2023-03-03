@@ -19,6 +19,9 @@ data/*/*
 
 *.jpg
 *.png
+*.pdf
+
+*.zip
 
 # Models
 *.pt
