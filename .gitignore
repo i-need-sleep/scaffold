@@ -2,6 +2,7 @@
 *.pyc
 */debug.py
 */tutorial.py
+code/utils/keychain.py
 
 # Data
 data/*/*
