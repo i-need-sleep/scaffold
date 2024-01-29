@@ -28,6 +28,8 @@ data/*/*
 # Model checkpoints
 *.pt
 *.bin
+*.ckpt
+results/runs/*/*
 
 # sh
 *.err
