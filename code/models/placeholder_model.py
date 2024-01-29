@@ -19,16 +19,23 @@ class PlaceholderModel(lightning.LightningModule):
         loss = torch.nn.functional.mse_loss(y_hat, y)
 
         # Logging to TensorBoard (if installed) by default
-        self.log("train_loss", loss)
+        self.log("train/loss", loss) # Time series
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self.model(x)
         loss = torch.nn.functional.mse_loss(y_hat, y)
-        self.log("val_loss", loss)
+        self.log("val/loss", loss) # Automatically averaged
+        return loss
+    
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self.model(x)
+        loss = torch.nn.functional.mse_loss(y_hat, y)
+        self.log("test/loss", loss) # Automatically averaged
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.args.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.args['lr'])
         return optimizer

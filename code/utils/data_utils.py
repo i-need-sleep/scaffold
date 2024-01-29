@@ -27,6 +27,13 @@ def placeholder_collate(batch):
     
 def get_placeholder_loader(batch_size, shuffle=True):
     dataset = PlaceholderDataset()
-    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=placeholder_collate)
+    loader = torch.utils.data.DataLoader(
+        dataset, 
+        batch_size=batch_size, 
+        shuffle=shuffle, 
+        collate_fn=placeholder_collate, 
+        num_workers=uglobals.NUM_WORKERS,
+        persistent_workers=True,
+        )
     return loader
     
