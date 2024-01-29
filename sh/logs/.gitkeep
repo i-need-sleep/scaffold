@@ -25,7 +25,7 @@ data/*/*
 
 *.zip
 
-# Model checkpoints
+# Models
 *.pt
 *.bin
 

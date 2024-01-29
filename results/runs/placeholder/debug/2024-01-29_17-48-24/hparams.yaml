@@ -1,0 +1,16 @@
+name: debug
+debug: true
+force_cpu: false
+task: placeholder
+batch_size: 3
+lr: 0.0003
+max_n_epochs: 4
+eval_n_epoch: 1
+checkpoint: ''
+uglobals:
+  SEED: 21
+  DATA_DIR: ../data
+  RESULTS_DIR: ../results
+  CHECKPOINTS_DIR: ../results/checkpoints
+  OUTPUTS_DIR: ../results/outputs
+  RUNS_DIR: ../results/runs
