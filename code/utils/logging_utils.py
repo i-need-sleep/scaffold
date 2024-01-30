@@ -1,8 +1,12 @@
 def print_and_save_args_uglobals(args, logger):
     # Print args
     print('\n=====Args:')
-    for key, val in vars(args).items():
-        print(f'{key}: {val}')
+    if type(args) == dict:
+        for key, val in args.items():
+            print(f'{key}: {val}')
+    else:
+        for key, val in vars(args).items():
+            print(f'{key}: {val}')
     print()
 
     # Save args

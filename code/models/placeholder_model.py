@@ -10,6 +10,7 @@ class PlaceholderModel(lightning.LightningModule):
             torch.nn.ReLU(),
             torch.nn.Linear(32, 1)
         )
+        self.save_hyperparameters(args)
 
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop.

@@ -8,7 +8,6 @@ import lightning
 
 import utils.globals as uglobals
 import utils.data_utils as data_utils
-import utils.training_utils as training_utils
 import utils.logging_utils as logging_utils
 
 from models.placeholder_model import PlaceholderModel
@@ -36,7 +35,7 @@ def main(args):
         version=f'{args.mode}_{date_str}',
     )
     checkpoint_callback = lightning.pytorch.callbacks.ModelCheckpoint(
-        dirpath=f'{logger_dir}/checkpoints',
+        dirpath=f'{logger_dir}/{args.name}/checkpoints',
         save_top_k=1,
         monitor='val/loss'
     )
@@ -49,7 +48,7 @@ def main(args):
         train_loader = data_utils.get_placeholder_loader(args.batch_size)
         dev_loader = data_utils.get_placeholder_loader(args.batch_size, shuffle=False)
         test_loader = data_utils.get_placeholder_loader(args.batch_size, shuffle=False)
-        model = training_utils.load_checkpoint_if_available(PlaceholderModel, args)
+        model = PlaceholderModel(vars(args))
     else:
         raise NotImplementedError
     
@@ -61,16 +60,16 @@ def main(args):
         logger=logger,
         deterministic=True,
         num_sanity_val_steps=2,
-        enable_progress_bar=args.debug,
+        # enable_progress_bar=args.debug,
         log_every_n_steps=1,
         fast_dev_run=5 if args.debug else False,
         callbacks=[checkpoint_callback]
     )
 
     if args.mode == 'train':
-        trainer.fit(model, train_loader, dev_loader)
+        trainer.fit(model, train_loader, dev_loader, ckpt_path=args.checkpoint)
     elif args.mode == 'test':
-        trainer.test(model, dataloaders=test_loader)
+        trainer.test(model, dataloaders=test_loader, ckpt_path=args.checkpoint)
     else:
         raise NotImplementedError
 
@@ -102,16 +101,14 @@ if __name__ == '__main__':
 
     if args.debug:
         args.name = 'debug'
-        # args.debug = False
+        args.debug = False
 
         args.task = 'placeholder'
         
         args.batch_size = 16
-        args.max_n_epochs = 100
-        args.lr = 1e-3
+        args.max_n_epochs = 10
 
         args.mode = 'test'
-        args.checkpoint = '../results/runs/placeholder/checkpoints/epoch=98-step=6237.ckpt'
+        args.checkpoint = '../results/runs/placeholder/debug/checkpoints/epoch=140-step=8883.ckpt'
 
     main(args)
-    
