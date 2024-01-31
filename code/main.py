@@ -14,7 +14,8 @@ from models.placeholder_model import PlaceholderModel
 
 def main(args):
     # Seeding
-    lightning.seed_everything(uglobals.SEED)
+    if not args.nondeterministic:
+        lightning.seed_everything(uglobals.SEED)
 
     # Device
     if not torch.cuda.is_available() or args.force_cpu:
@@ -58,7 +59,7 @@ def main(args):
         check_val_every_n_epoch=args.eval_n_epoch,
         accelerator=accelerator,
         logger=logger,
-        deterministic=True,
+        deterministic=not args.nondeterministic,
         num_sanity_val_steps=2,
         # enable_progress_bar=args.debug,
         log_every_n_steps=1,
@@ -84,6 +85,7 @@ if __name__ == '__main__':
     parser.add_argument('--name', type=str, default='unnamed')
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--force_cpu', action='store_true')
+    parser.add_argument('--nondeterministic', action='store_true')
     
     # Formulation
     parser.add_argument('--task', type=str, default=None, choices=['placeholder'])
