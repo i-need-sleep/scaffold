@@ -38,6 +38,7 @@ def main(args):
     )
     checkpoint_callback = lightning.pytorch.callbacks.ModelCheckpoint(
         dirpath=f'{logger_dir}/{args.name}/checkpoints',
+        save_last=True,
         save_top_k=1,
         monitor='val/loss'
     )
