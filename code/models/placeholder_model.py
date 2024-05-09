@@ -1,135 +1,84 @@
 from pathlib import Path
+import itertools
 
-import torch, torchvision
+import torch
 import lightning
-import vector_quantize_pytorch
-
-from models.modeling_utils.res_module import ResModule
+from lightning.pytorch.utilities import grad_norm
 
 class PlaceholderModel(lightning.LightningModule):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.save_hyperparameters(args)
-        self.encoder = torch.nn.Sequential(
-            torch.nn.Conv2d(1, 32, kernel_size=(5, 5), padding=(2, 2)),
+        self.save_hyperparameters()
+        self.model = torch.nn.Sequential(
+            torch.nn.Linear(2, 10),
             torch.nn.ReLU(),
-            ResModule(
-                torch.nn.Sequential(
-                    torch.nn.Conv2d(32, 32, kernel_size=(5, 5), padding=(2, 2)),
-                    torch.nn.ReLU(),
-                    torch.nn.Conv2d(32, 32, kernel_size=(5, 5), padding=(2, 2)),
-                    torch.nn.ReLU(),
-                )
-            ),
-            torch.nn.Conv2d(32, 64, kernel_size=(5, 5), padding=(2, 2)),
-            torch.nn.ReLU(),
-            ResModule(
-                torch.nn.Sequential(
-                    torch.nn.Conv2d(64, 64, kernel_size=(5, 5), padding=(2, 2)),
-                    torch.nn.ReLU(),
-                    torch.nn.Conv2d(64, 64, kernel_size=(5, 5), padding=(2, 2)),
-                    torch.nn.ReLU(),
-                )
-            ),
-            torch.nn.Conv2d(64, 128, kernel_size=(28, 28)),
-        )
-        self.rvq = vector_quantize_pytorch.ResidualVQ(
-            dim = 128,
-            num_quantizers = 8,
-            codebook_size = 512,
-            stochastic_sample_codes = True,
-            sample_codebook_temp = 0.1,
-            shared_codebook = True
-        )
-        self.decoder = torch.nn.Sequential(
-            torch.nn.ConvTranspose2d(128, 64, kernel_size=(28, 28)),
-            torch.nn.ReLU(),
-            ResModule(
-                torch.nn.Sequential(
-                    torch.nn.ConvTranspose2d(64, 64, kernel_size=(5, 5), padding=(2, 2)),
-                    torch.nn.ReLU(),
-                    torch.nn.ConvTranspose2d(64, 64, kernel_size=(5, 5), padding=(2, 2)),
-                    torch.nn.ReLU(),
-                )
-            ),
-            torch.nn.ConvTranspose2d(64, 32, kernel_size=(5, 5), padding=(2, 2)),
-            torch.nn.ReLU(),
-            ResModule(
-                torch.nn.Sequential(
-                    torch.nn.ConvTranspose2d(32, 32, kernel_size=(5, 5), padding=(2, 2)),
-                    torch.nn.ReLU(),
-                    torch.nn.ConvTranspose2d(32, 32, kernel_size=(5, 5), padding=(2, 2)),
-                    torch.nn.ReLU(),
-                )
-            ),
-            torch.nn.ConvTranspose2d(32, 1, kernel_size=(5, 5), padding=(2, 2)),
+            torch.nn.Linear(10, 1)
         )
 
         # Initialize the output folder
-        self.output_folder = f'{args["uglobals"]["OUTPUTS_DIR"]}/{args["task"]}/{args["name"]}'
-        Path(self.output_folder).mkdir(parents=True, exist_ok=True)
-        self.output_idx = 0 # For indicing predictions
+        self.output_folder = f'{args["uglobals"]["OUTPUTS_DIR"]}/{args["task"]}/{args["experiment_group"]}/{args["name"]}'
+        if args['mode'] == 'predict_dev':
+            Path(self.output_folder).mkdir(parents=True, exist_ok=True)
 
+    # Optimization
+    def configure_optimizers(self):
+        params = [self.model.parameters()]
+        self.params_to_update = itertools.chain(*params)
+        optimizer = torch.optim.Adam(self.params_to_update, lr=self.args['lr'])
+        # Since Adam is per-parameter, we don't need to re-initalize the optimizer when switching training modes
+
+        # LR scheduler
+        scheduler_warmup = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=self.args['lr_scheduler_start_factor'], end_factor=1, total_iters=self.args['lr_scheduler_warmup_epochs'])
+        scheduler_anneal = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1, end_factor=self.args['lr_scheduler_end_factor'], total_iters=self.args['lr_scheduler_anneal_epochs'])
+        scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, [scheduler_warmup, scheduler_anneal], milestones=[self.args['lr_scheduler_warmup_epochs']])
+        return [optimizer], [scheduler]
+    
+    def on_before_optimizer_step(self, optimizer):
+        # Track the gradient norms
+        grad_norms = grad_norm(self, norm_type=2)['grad_2.0_norm_total']
+        self.log('train/lr', self.trainer.optimizers[0].param_groups[0]['lr'], batch_size=1)
+        self.log('train/grad_norms', grad_norms, batch_size=1)
+    
+    # Forward passes, losses and inference
     def forward(self, x):
-        # x: [batch_size, 1, 28, 28]
-        x = self.encoder(x)
-        x = torch.squeeze(x)
+        # x: [batch_size, 2]
+        x = self.model(x)
+        return x
+    
+    def batch_to_loss_and_log(self, batch, log_name):
+        x, y = batch
+        batch_size = x.shape[0]
+        pred = self.forward(x)
+        loss = torch.nn.functional.mse_loss(pred, y)
 
-        quantized, indices, commit_loss = self.rvq(x)
-        # [batch_size, 128], [batch_size, n_quantizers], [batch_size, n_quantizers]
-        commit_loss = torch.mean(commit_loss)
-        
-        quantized = quantized.unsqueeze(-1).unsqueeze(-1)
-        x_hat = self.decoder(quantized)
-        return x_hat, commit_loss
+        if log_name != None:
+            self.log(f'{log_name}/mse_loss', loss, batch_size=batch_size) # Automatically averaged across all samples in batch. Averaged across all batches for val/test.
+            self.log(f'{log_name}/monitor', loss, batch_size=batch_size) # Keep the best checkpoint based on this metric
+        return loss, batch, pred
 
+    # Step functions
     def training_step(self, batch, batch_idx):
-        x, _ = batch # Discard the labels. Train on an autoencoding task.
-        x_hat, commit_loss = self.forward(x)
-        recons_loss = torch.nn.functional.mse_loss(x_hat, x)
-        loss = recons_loss + commit_loss
-
-        self.log("train/loss", loss)
-        self.log("train/recons_loss", recons_loss)
-        self.log("train/commit_loss", commit_loss)
+        loss, _, _ = self.batch_to_loss_and_log(batch, 'train')
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, _ = batch
-        x_hat, commit_loss = self.forward(x)
-        recons_loss = torch.nn.functional.mse_loss(x_hat, x)
-        loss = recons_loss + commit_loss
-
-        self.log("val/loss", loss) # Automatically averaged
-        self.log("val/recons_loss", recons_loss)
-        self.log("val/commit_loss", commit_loss)
+        loss, _, _ = self.batch_to_loss_and_log(batch, 'val')
         return loss
     
     def test_step(self, batch, batch_idx):
-        x, _ = batch
-        x_hat, commit_loss = self.forward(x)
-        recons_loss = torch.nn.functional.mse_loss(x_hat, x)
-        loss = recons_loss + commit_loss
-
-        self.log("val/loss", loss) # Automatically averaged
-        self.log("val/recons_loss", recons_loss)
-        self.log("val/commit_loss", commit_loss)
+        loss, _, _ = self.batch_to_loss_and_log(batch, 'test')
         return loss
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.args['lr'])
-        return optimizer
     
     def predict_step(self, batch, batch_idx):
-        x, _ = batch
-        x_hat, commit_loss = self.forward(x)
+        loss, batch, pred = self.batch_to_loss_and_log(batch, None)
         
         # Save the predictions/GT
-        for i in range(x.shape[0]):
-            torchvision.utils.save_image(x[i], f'{self.output_folder}/{self.output_idx}_gt.png')
-            torchvision.utils.save_image(x_hat[i], f'{self.output_folder}/{self.output_idx}_pred.png')
-            self.output_idx += 1
-            if self.output_idx >= self.args['n_predictions']:
-                return
+        for i in range(pred.shape[0]):
+            x, y = batch
+            x = x[i].tolist()
+            y = y[i].item()
+            y_hat = pred[i].item()
+            with open(f'{self.output_folder}/{batch_idx}_{i}.txt', 'a') as f:
+                f.write(f'x: {x}\ny: {y}\ny_hat: {y_hat}\n\n')
         return 
